@@ -25,6 +25,7 @@ x = dbconn.pgquery(dbconn.conn,query,None)
 df = pd.DataFrame(x, columns= colnames).set_index('datetime')
 df = df.sort_values(by = ['ticker', 'datetime'], ascending = [True, True])
 df['date']  = df.index.date
+
 df['time'] = df.index.time
 
 def addmatches(df):
