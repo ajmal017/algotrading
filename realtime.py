@@ -34,8 +34,6 @@ selectqry = 'SELECT * FROM ' + newdbname
 conn = dbconnection.pgconnect()
 dbconnection.pgquery(conn,creatdbquery,False)
 
-
-
 class App(EWrapper, EClient):
     def __init__(self):
         EClient.__init__(self, wrapper=self)
@@ -76,7 +74,6 @@ class App(EWrapper, EClient):
 
         order.contract = contract
 
-
     def orderStatus(self, orderId: int, status: str, filled: float,
                     remaining: float, avgFillPrice: float, permId: int,
                     parentId: int, lastFillPrice: float, clientId: int,
@@ -109,7 +106,7 @@ class App(EWrapper, EClient):
         if self.fiveseccount == len(self.tickerlist):
             self.fiveseccount = 0
             self.timefilterend = datetime.now() - timedelta(seconds = datetime.now().time().second)
-            #read from database only times less than most recent comleted minute
+            #read from database only times less than most recent completed minute
             self.selectqry = 'SELECT * FROM ' + newdbname + ' WHERE datetime <= ' + str(self.timefilterend)
             self.df= pd.DataFrame(dbconnection.pgquery(conn,selectqry,False),columns=self.colnames)
             #create new alpha model object
