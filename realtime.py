@@ -50,6 +50,8 @@ class App(EWrapper, EClient):
         self.lasttime = time.time()
         self.requestcounter = 0
         self.fiveseccount = 0
+        for ticker in self.tickerlist:
+            self.positions[ticker] = {'position':0}
 
     def nextOrderId(self):
         oid = self.nextValidOrderId
@@ -73,6 +75,18 @@ class App(EWrapper, EClient):
               "LmtPrice:", order.lmtPrice, "AuxPrice:", order.auxPrice, "Status:", orderState.status)
 
         order.contract = contract
+
+    def position(self, account: str, contract: Contract, position: float,avgCost: float):
+        self.position[contract.symbol] = position
+
+        print("Position.", "Account:", account, "Symbol:", contract.symbol, "SecType:",
+              contract.secType, "Currency:", contract.currency,
+              "Position:", position, "Avg cost:", avgCost)
+
+    def positionEnd(self):
+        self.positiondf = pd.DataFrame(self.positions).transpose()
+        self.openpositionlist = self.position[self.position['position']].index.to_list()
+        print("PositionEnd")
 
     def orderStatus(self, orderId: int, status: str, filled: float,
                     remaining: float, avgFillPrice: float, permId: int,
@@ -106,14 +120,19 @@ class App(EWrapper, EClient):
         if self.fiveseccount == len(self.tickerlist):
             self.fiveseccount = 0
             self.timefilterend = datetime.now() - timedelta(seconds = datetime.now().time().second)
-            #read from database only times less than most recent completed minute
+            #read from database only times less than or eaul to most recent completed minute
             self.selectqry = 'SELECT * FROM ' + newdbname + ' WHERE datetime <= ' + str(self.timefilterend)
             self.df= pd.DataFrame(dbconnection.pgquery(conn,selectqry,False),columns=self.colnames)
             #create new alpha model object
             self.alpha = al.alphamodel(self.df)
+            # get all open positions to check close signals
+            self.alpha.generateCloseSignals(self.openpositionlist)
+
+
             #get all trades from signals
             self.tradesdf = self.alpha.gettrades()
             self.sendorders(self.tradesdf)
+
 
 
     def sendorders(self,trades):
@@ -122,7 +141,7 @@ class App(EWrapper, EClient):
             side = row['side']
             quantity = row['quantity']
             limitpx = row['limitpx']
-
+#TODO when trading live need to add CS algo
             self.placeOrder(self.nextOrderId(), ticker,LimitOrder(side,quantity,limitpx))
 
     def throttle(self):
@@ -136,6 +155,7 @@ class App(EWrapper, EClient):
         print("Error. Id: " , reqId, " Code: " , errorCode , " Msg: " , errorString)
 
     def start(self):
+        self.reqPositions()
         for i in range(len(self.contracts)):
             print('sending ' + str(self.contracts[i].symbol))
             self.requestcounter +=1

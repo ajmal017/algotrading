@@ -97,6 +97,56 @@ def addTradeColumns(data):
     data['tradeid'] = 0
     return data
 
+def addInitalPositions(data):
+    data['closesignal'] = 0
+    data['state'] = 'no position'
+    data['tradeid'] = 0
+    data['decisionpx'] = np.where(data['signal']==1,data['close'],0)
+    data['tradepx'] = np.where(data['signal'].shift(1)==1,data['wap'],np.where((data['signal'].shift(1)==-1),data['wap'],0))
+    #init positions
+    data['state'] = np.where(data['signal'].shift(1)==1,'long',np.where(data['signal'].shift(1)==-1,'short','no position'))
+    data['position'] = np.where(data['signal'].shift(1)==1,10000/data['wap'],np.where((data['signal'].shift(1)==-1),-10000/data['wap'],0))
+    data['longstop'] = data['low'].shift(1)/100
+    data['shortstop'] = data['high'].shift(1)/100
+
+    return data
+
+def  genTrades(data):
+    counter =1
+    for i in range(1,len(data)):
+        if data['position'].iloc[i-1]>0 and data['tradepx'].iloc[i] ==0:
+            data['position'].iloc[i] = data['position'].iloc[i-1]
+            data['state'].iloc[i] = data['state'].iloc[i-1]
+
+            if (data['wap'].iloc[i]<data['longstop'].iloc[i]) or (data['position'].iloc[i] != 0 and data.index[i].time() ==datetime.time(16,9)):
+                data['decisionpx'].iloc[i] = data['close'].iloc[i]
+                data['closesignal'].iloc[i] = -1
+                data['position'].iloc[i+1] =0
+                data['tradepx'].iloc[i+1] = data['wap'].iloc[i+1]
+                data['state'].iloc[i+1] = 'long'
+
+
+        if data['position'].iloc[i-1]<0 and data['tradepx'].iloc[i] ==0:
+            data['position'].iloc[i] = data['position'].iloc[i-1]
+            data['state'].iloc[i] = data['state'].iloc[i-1]
+
+            if (data['wap'].iloc[i]>data['shortstop'].iloc[i]) or (data['position'].iloc[i] != 0 and data.index[i].time() ==datetime.time(16,9)):
+                data['decisionpx'].iloc[i] = data['close'].iloc[i]
+                data['closesignal'].iloc[i] = 1
+                data['position'].iloc[i+1] =0
+                data['tradepx'].iloc[i+1] = data['wap'].iloc[i+1]
+                data['state'].iloc[i+1] = 'short'
+
+        if data['state'].iloc[i-1] == 'no position' and data['state'].iloc[i] != 'no position':
+            data['tradeid'].iloc[i] = counter
+            counter +=1
+        elif data['state'].iloc[i-1] == data['state'].iloc[i]:
+            data['tradeid'].iloc[i] = data['tradeid'].iloc[i-1]
+        elif data['state'].iloc[i-1]!='no position' and data['state'].iloc[i]=='no position':
+            data['tradeid'].iloc[i] = 0
+
+    return data
+
 def gapUpFail(df,gap = 0.02,failby = datetime.time(10,15)):
 
     data = df.copy()
@@ -137,19 +187,7 @@ def gapUpFail(df,gap = 0.02,failby = datetime.time(10,15)):
 
 x = gapUpFail(df)
 
-def addInitalPositions(data):
-    data['closesignal'] = 0
-    data['state'] = 'no position'
-    data['tradeid'] = 0
-    data['decisionpx'] = np.where(data['signal']==1,data['close'],0)
-    data['tradepx'] = np.where(data['signal'].shift(1)==1,data['wap'],np.where((data['signal'].shift(1)==-1),data['wap'],0))
-    #init positions
-    data['state'] = np.where(data['signal'].shift(1)==1,'long',np.where(data['signal'].shift(1)==-1,'short','no position'))
-    data['position'] = np.where(data['signal'].shift(1)==1,10000/data['wap'],np.where((data['signal'].shift(1)==-1),-10000/data['wap'],0))
-    data['longstop'] = data['low'].shift(1)/100
-    data['shortstop'] = data['high'].shift(1)/100
 
-    return data
 
 
 i = gapUpFail(df)
@@ -186,42 +224,6 @@ def genEntrySignals(df):
     data['shortstop'] = data['high'].shift(1)/100
     data = genTrades(data)
     data['positionval'] = data['position'].abs() * data['close']/100
-
-    return data
-
-def  genTrades(data):
-    counter =1
-    for i in range(1,len(data)):
-        if data['position'].iloc[i-1]>0 and data['tradepx'].iloc[i] ==0:
-            data['position'].iloc[i] = data['position'].iloc[i-1]
-            data['state'].iloc[i] = data['state'].iloc[i-1]
-
-            if (data['wap'].iloc[i]<data['longstop'].iloc[i]) or (data['position'].iloc[i] != 0 and data.index[i].time() ==datetime.time(16,9)):
-                data['decisionpx'].iloc[i] = data['close'].iloc[i]
-                data['closesignal'].iloc[i] = -1
-                data['position'].iloc[i+1] =0
-                data['tradepx'].iloc[i+1] = data['wap'].iloc[i+1]
-                data['state'].iloc[i+1] = 'long'
-
-
-        if data['position'].iloc[i-1]<0 and data['tradepx'].iloc[i] ==0:
-            data['position'].iloc[i] = data['position'].iloc[i-1]
-            data['state'].iloc[i] = data['state'].iloc[i-1]
-
-            if (data['wap'].iloc[i]>data['shortstop'].iloc[i]) or (data['position'].iloc[i] != 0 and data.index[i].time() ==datetime.time(16,9)):
-                data['decisionpx'].iloc[i] = data['close'].iloc[i]
-                data['closesignal'].iloc[i] = 1
-                data['position'].iloc[i+1] =0
-                data['tradepx'].iloc[i+1] = data['wap'].iloc[i+1]
-                data['state'].iloc[i+1] = 'short'
-
-        if data['state'].iloc[i-1] == 'no position' and data['state'].iloc[i] != 'no position':
-            data['tradeid'].iloc[i] = counter
-            counter +=1
-        elif data['state'].iloc[i-1] == data['state'].iloc[i]:
-            data['tradeid'].iloc[i] = data['tradeid'].iloc[i-1]
-        elif data['state'].iloc[i-1]!='no position' and data['state'].iloc[i]=='no position':
-            data['tradeid'].iloc[i] = 0
 
     return data
 
