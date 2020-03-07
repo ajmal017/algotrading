@@ -120,19 +120,21 @@ class App(EWrapper, EClient):
         if self.fiveseccount == len(self.tickerlist):
             self.fiveseccount = 0
             self.timefilterend = datetime.now() - timedelta(seconds = datetime.now().time().second)
-            #read from database only times less than or eaul to most recent completed minute
+            #read from database only times less than or eaual to most recent completed minute
             self.selectqry = 'SELECT * FROM ' + newdbname + ' WHERE datetime <= ' + str(self.timefilterend)
             self.df= pd.DataFrame(dbconnection.pgquery(conn,selectqry,False),columns=self.colnames)
             #create new alpha model object
             self.alpha = al.alphamodel(self.df)
-            # get all open positions to check close signals
+            #close any open trades with sell signals first
             self.alpha.generateCloseSignals(self.openpositionlist)
-
-
-            #get all trades from signals
-            self.tradesdf = self.alpha.gettrades()
+            self.tradesdf = self.alpha.genTrades(self.alpha.closetrades)
             self.sendorders(self.tradesdf)
 
+            #can only open new positions without existing positions
+            self.nonopenpositionlist = list(set(self.tickerlist) - set(self.openpositionlist))
+            self.alpha.generateSignals(self.nonopenpositionlist)
+            self.tradesdf = self.alpha.genTrades(self.alpha.opentrades)
+            self.sendorders(self.tradesdf)
 
 
     def sendorders(self,trades):
@@ -160,7 +162,6 @@ class App(EWrapper, EClient):
             print('sending ' + str(self.contracts[i].symbol))
             self.requestcounter +=1
             self.throttle()
-            #self.sendorder()
             self.reqRealTimeBars(self.nextValidOrderId + i,self.contracts[i],5,'TRADES',True,[])
 
 
