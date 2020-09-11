@@ -7,306 +7,317 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import stockplot as sp
 import imp
-import datetime
+pd.options.mode.chained_assignment = None
 import filters
+import features as ft
 import datetime
-
-imp.reload(filters)
+import pyfinance as pf
+imp.reload(ft)
+imp.reload(sp)
 dbconn = connectdb.connectdb()
 dbconn.conn = dbconn.pgconnect()
 
 query = """
-SELECT * FROM asxminutedata1 where datetime < '31/10/2019' AND 
-ticker in ('APT','APX') 
+SELECT * FROM asxminutedata where datetime > '06/05/2019' AND datetime < '31/08/2020' AND
+ticker in ('ANZ','WBC') 
 """
-
-queryall = """
-SELECT distinct ticker FROM asxminutedata1
+query2 = """
+SELECT * FROM asxminutedata where datetime > '30/05/2020' and datetime < '31/08/2020' AND
+ticker in ('ANZ','WBC') 
 """
-colnames = ['open','high','low','close','volume','value','count','datetime','ticker','vwap','avat30','cavat30','wap']
+colnames = ['open','high','low','close','volume','value','count','datetime','ticker']
 x = dbconn.pgquery(dbconn.conn,query,None)
 df = pd.DataFrame(x, columns= colnames).set_index('datetime')
 df = df.sort_values(by = ['ticker', 'datetime'], ascending = [True, True])
 df['date']  = df.index.date
 df['time'] = df.index.time
 
-#add additional features
-def addmatches(df):
-    #finds first non zero volume bar for each ticker and date
+#add features
+def addfeat(df):
+    df = ft.addmatches(df)
+    df = ft.vwap(df)
+    df = ft.wap(df)
+    df = ft.addsma(df,[30,5],'volume')
+    df = ft.addsma(df,[5,30],'close')
+    df = ft.avat(df)
+    df = ft.zeds(df)
+    df = ft.prevclose(df)
+    df = ft.avat(df)
+    return df
+df = addfeat(df)
+spreaddf = ft.spread(df,['ANZ','WBC'],['close','volume','daychg'])
+
+
+#spreaddf = ft.addsma(spreaddf,[5,30],('ANZWBCclose'),spread=True)
+
+#add signals
+# def movingavgcross(df,short,long,col):
+#     data = df.copy()
+#     above = data[short + col]>data[long + col]
+#     crossedabove = data[short + 'prev' + col]<=data[long + 'prev' + col]
+#     below = data[short + col]<data[long + col]
+#     crossedbelow = data[short + 'prev' + col]>=data[long + 'prev' + col]
+#     data['signal'] = np.where((above) & (crossedabove),'buy',np.where((below) & (crossedbelow),'sell',''))
+#     return data
+# spreaddf = movingavgcross(spreaddf,'sma5','sma30','ANZWBCclose')
+
+def spreadtrade(df,col1,col2,upper =0.0068,lower = -0.0083 ):
     data = df.copy()
-    datanonzero = data[data['volume']!=0]
-    datanonzero.reset_index(inplace=True)
-    openmatchdf = datanonzero.groupby(['ticker',datanonzero.date])['datetime'].first().reset_index()
-    closingmatchdf = datanonzero.groupby(['ticker',datanonzero.date])['datetime'].last().reset_index()
-    openmatchdf['match'] = 'opening match'
-    closingmatchdf['match'] = 'closing match'
-    matchdf = pd.concat([openmatchdf,closingmatchdf])
-    matchdf.drop(columns = ['date'],inplace  = True)
-    data = pd.merge(data,matchdf,how ='left',left_on=['datetime','ticker'],right_on=['datetime','ticker'])
-    #add 10day average volume for opening match
-    openingmatchdf = data[data['match']=='opening match']
-    openingmatchdf['10dayavgopenvol'] = openingmatchdf.groupby('ticker')['volume'].transform(lambda x: x.rolling(10).mean())
-    openingmatchdf.reset_index(inplace=True)
-    openingmatchdf = openingmatchdf[['ticker','datetime','10dayavgopenvol']]
-    data = pd.merge(data,openingmatchdf,on = ['ticker','datetime'],how = 'left')
-    data.set_index('datetime',inplace = True)
-    return data
-df = addmatches(df)
-
-i = df[df['match'].notna()]
-
-starttime = df[df['match']=='opening match']
-endtime = df[df['match']=='closing match']
-df['signal'] = 0
-
-def addbarcount(df):
-    data = df.copy()
-    data['barcount'] = 0
-    barcountlist = []
-    prevcount =0
-
-    for row in data.itertuples():
-        if row.match =='opening match':
-            barcountlist.append(1)
-            prevcount =1
-
-        elif barcountlist[-1]>0:
-            barcountlist.append(prevcount +1 )
-            prevcount +=1
-        else:
-            barcountlist.append(0)
-
-    return barcountlist
-
-def addsma(df,period =[5]):
-    data = df.copy()
-    for i in period:
-        data['sma'+str(i)] = data.groupby(['date','ticker'])['close'].transform(lambda x: x.rolling(i).mean())
-        data['smaprev'+str(i)] = data.groupby(['date','ticker'])['sma'+str(i)].shift(1)
+    data['spread'] = data[col1] - data[col2]
+    data['signal'] = np.where((data['spread'] > upper),'sell',np.where(data['spread']<lower,'buy',''))
     return data
 
-x = addsma(df,[5,10,20])
-
-def movingavgcross(df,signal = 'buy'):
-    data = df.copy()
-    above = data['sma5']>data['sma20']
-    crossed = data['smaprev5']<=data['smaprev20']
-    data['signal'] = np.where((above) & (crossed),signal,'')
-    return data
-
-test = movingavgcross(x)
-
-def gapUpFail(df,gap = 0.02,failby = datetime.time(10,15)):
-
-    data = df.copy()
-    data = addTradeColumns(data)
-    data = gapfinder(data,0.03,False)
-    data.reset_index(inplace= True)
-    dayopendf = data[data['match']=='opening match'][['open','date','ticker']]
-    dayopendf.rename(columns = {'open':'dayopen'},inplace = True)
-    data = pd.merge(data,dayopendf,on=['ticker','date'],how = 'left')
-    data.set_index('datetime',inplace = True)
-
-    barcount = 0
-    closelist = []
-    prevrow = data.iloc[0:1,:]
-
-    for row in data.itertuples():
-
-        if row.match =='opening match':
-            barcount =1
-
-        if barcount>0:
-            if barcount <12:
-
-                if row.close  < row.dayopen:
-                    closelist.append(1)
-                else:
-                    closelist.append(0)
-
-                if sum(closelist[-3:]) == 3:
-                    sigrow = (data['ticker']==row.ticker)&(data.index == row.Index)
-                    data.loc[sigrow,'signal']=-1
-
-                if row.Index.time() > datetime.time(16, 58):
-                    prevrow = 0
-                    barcount = 0
-
-                else:
-                    prevrow = row
-                    barcount +=1
-            else:
-                prevrow = row
-        else:
-            prevrow = row
-
-    return data
+spreaddf = spreadtrade(spreaddf, 'ANZdaychg','WBCdaychg',upper =0.004,lower = -0.004)
 
 
+#genetrate trades df
 
-def backtest(df,target=0.02,stop=0.01):
+def generatetrades(df,target=0.003,stop=0.009, spread = []):
+    #takes a data frame with sell and buy signals, iterates through and opens and closes trades based on stop, target
+    # and time rules. Only opens a trade when not already open. Return dataframe of trades. Needs a spreaddf with col
+    # as spread for spread trades
+
     openlong = False
+    openshort = False
+    skip =True
+    counter =1
     data = df.copy()
-    trades = pd.DataFrame(columns=['datetime','ticker','side','price','quantity'])
+    name1 = spread[0] + 'close'
+    name2 = spread[1] + 'close'
+    trades = pd.DataFrame(columns=['datetime','ticker','side','price','quantity','tradeid','date','state'])
+
+    if spread:
+        #need to rename spreadcol to 'close' so it works with iteration
+        data.rename(columns = {spread[0]+spread[1]+'close':'close'},inplace = True)
+
+    def createtrades(trades,side):
+
+        if side == 'sell' and openlong == False:
+            quantity = -1000
+            state = 'short'
+        elif side == 'buy' and openshort == False:
+            quantity = 1000
+            state = 'long'
+        elif side== 'sell' and openlong == True:
+            quantity = 1000
+            state = 'long'
+        elif side =='buy' and openshort == True:
+            quantity = -1000
+            state = 'short'
+        if not spread:
+            tradedict =  {'tradeid':counter,'datetime':row.Index,'ticker':row.ticker,'side': side,
+                          'price':row.close,'quantity':quantity,'state':state}
+            trades = trades.append(tradedict,ignore_index=True)
+
+        else:
+            tradedict =  {'tradeid':counter,'datetime':row.Index,'ticker':spread[0],'side': side,
+                          'price':getattr(row,name1),'quantity':quantity,'state':state}
+            trades = trades.append(tradedict,ignore_index=True)
+
+            if side == 'buy':
+                side = 'sell'
+            else:
+                side = 'buy'
+            tradedict = {'tradeid': counter, 'datetime': row.Index, 'ticker': spread[1], 'side': side,
+                         'price': getattr(row,name2), 'quantity': quantity * -1, 'state': state}
+
+            trades = trades.append(tradedict, ignore_index=True)
+
+
+        return trades
 
     for row in data.itertuples():
-        if openlong == False:
-            if row.signal != '':
-                openlong = True
-                tradedict =  {'datetime':row.Index,'ticker':row.ticker,'side':row.signal,'price':row.close,'quantity':1000}
-                stoppx = round(row.close*(1-stop),4)
-                targetpx = round(row.close*(1+target),4)
-                trades = trades.append(tradedict,ignore_index=True)
-        elif openlong == True:
-            if row.close < stoppx or row.close> targetpx or row.Index.time() > datetime.time(16, 58):
-                tradedict =  {'datetime':row.Index,'ticker':row.ticker,'side':'sell','price':row.close,'quantity':1000}
-                trades = trades.append(tradedict,ignore_index=True)
-                openlong = False
+        if skip ==False:
+            if openlong == False and openshort == False:
+                if row.signal == 'buy' and row.Index.time() < datetime.time(15, 50) and getattr(row,spread[0]+'volume') > 0\
+                        and getattr(row,spread[1]+'volume') > 0:
+                    openlong = True
+                    stoppx = round(row.close*(1-stop),4)
+                    targetpx = round(row.close*(1+target),4)
+                    trades = createtrades(trades,row.signal)
+                    skip = True
 
+                elif row.signal == 'sell' and row.Index.time() < datetime.time(15, 50) and getattr(row,spread[0]+'volume') > 0\
+                        and getattr(row,spread[1]+'volume') > 0:
+                    openshort = True
+                    stoppx = round(row.close*(1+stop),4)
+                    targetpx = round(row.close*(1-target),4)
+                    trades = createtrades(trades,row.signal)
+                    skip = True
+
+            elif openlong == True:
+                if row.close < stoppx or row.close > targetpx or row.Index.time() > datetime.time(15, 57) and getattr(row,spread[0]+'volume') > 0\
+                        and getattr(row,spread[1]+'volume') > 0:
+                    trades = createtrades(trades,'sell')
+                    openlong = False
+                    stoppx = 0
+                    targetpx =0
+                    counter+=1
+                    skip = True
+
+            elif openshort == True:
+                if row.close > stoppx or row.close < targetpx or row.Index.time() > datetime.time(15, 57) and getattr(row,spread[0]+'volume') > 0\
+                        and getattr(row,spread[1]+'volume') > 0:
+                    trades = createtrades(trades,'buy')
+                    openshort = False
+                    stoppx = 0
+                    targetpx =0
+                    counter+=1
+                    skip = True
+        else:
+            skip = False
+
+    trades['date'] = trades.datetime.dt.date
     return trades
 
 
-i= backtest(test)
-
-# def addTradeColumns(data):
-#     data['signal'] = 0
-#     data['closesignal'] = 0
-#     data['state'] = 'no position'
-#     data['tradeid'] = 0
-#     return data
-#
-# def addInitalPositions(data):
-#     data['closesignal'] = 0
-#     data['state'] = 'no position'
-#     data['tradeid'] = 0
-#     data['decisionpx'] = np.where(data['signal']==1,data['close'],0)
-#     data['tradepx'] = np.where(data['signal'].shift(1)==1,data['wap'],np.where((data['signal'].shift(1)==-1),data['wap'],0))
-#     #init positions
-#     data['state'] = np.where(data['signal'].shift(1)==1,'long',np.where(data['signal'].shift(1)==-1,'short','no position'))
-#     data['position'] = np.where(data['signal'].shift(1)==1,10000/data['wap'],np.where((data['signal'].shift(1)==-1),-10000/data['wap'],0))
-#     data['longstop'] = data['low'].shift(1)/100
-#     data['shortstop'] = data['high'].shift(1)/100
-#
-#     return data
-#
-# def  genTrades(data):
-#     counter =1
-#     for i in range(1,len(data)):
-#         if data['position'].iloc[i-1]>0 and data['tradepx'].iloc[i] ==0:
-#             data['position'].iloc[i] = data['position'].iloc[i-1]
-#             data['state'].iloc[i] = data['state'].iloc[i-1]
-#
-#             if (data['wap'].iloc[i]<data['longstop'].iloc[i]) or (data['position'].iloc[i] != 0 and data.index[i].time() ==datetime.time(16,9)):
-#                 data['decisionpx'].iloc[i] = data['close'].iloc[i]
-#                 data['closesignal'].iloc[i] = -1
-#                 data['position'].iloc[i+1] =0
-#                 data['tradepx'].iloc[i+1] = data['wap'].iloc[i+1]
-#                 data['state'].iloc[i+1] = 'long'
-#
-#
-#         if data['position'].iloc[i-1]<0 and data['tradepx'].iloc[i] ==0:
-#             data['position'].iloc[i] = data['position'].iloc[i-1]
-#             data['state'].iloc[i] = data['state'].iloc[i-1]
-#
-#             if (data['wap'].iloc[i]>data['shortstop'].iloc[i]) or (data['position'].iloc[i] != 0 and data.index[i].time() ==datetime.time(16,9)):
-#                 data['decisionpx'].iloc[i] = data['close'].iloc[i]
-#                 data['closesignal'].iloc[i] = 1
-#                 data['position'].iloc[i+1] =0
-#                 data['tradepx'].iloc[i+1] = data['wap'].iloc[i+1]
-#                 data['state'].iloc[i+1] = 'short'
-#
-#         if data['state'].iloc[i-1] == 'no position' and data['state'].iloc[i] != 'no position':
-#             data['tradeid'].iloc[i] = counter
-#             counter +=1
-#         elif data['state'].iloc[i-1] == data['state'].iloc[i]:
-#             data['tradeid'].iloc[i] = data['tradeid'].iloc[i-1]
-#         elif data['state'].iloc[i-1]!='no position' and data['state'].iloc[i]=='no position':
-#             data['tradeid'].iloc[i] = 0
-#
-#     return data
+trades = generatetrades(spreaddf,target=0.004,stop = 0.009 ,spread = ['ANZ','WBC'])
 
 
+# join trades with pricedf
+def jointrades(tradesdf, fulldf):
+    # join the trades df back to the full data df for ease of plotting backtest results
+    def openpositionfilter(merged):
+        # filters larger dataframe by when there is an open trade and fills down the trade id so we can groupby tradeid
+        grouped = merged.groupby('tradeid')
+        for name, group in grouped:
 
-df[df['volume']>0].iloc[0]
+            mask = ((merged['datetime'] >= grouped.get_group(name).datetime.iloc[0]) & (
+                        merged['datetime'] <= grouped.get_group(name).datetime.iloc[-1])
+                    & (merged['ticker'].isin(grouped.get_group(name).ticker.unique())))
+            if name == 1:
+                filter = mask
+            else:
+                filter = mask | filter
 
-df.groupby(['date','ticker'])['volume'].nonzero()
+        opentrade = merged.loc[filter]
+        cols = ['tradeid', 'quantity', 'state']
+        opentrade.loc[:, cols] = opentrade.loc[:, cols].ffill()
+        tradeids = opentrade[['tradeid', 'datetime', 'ticker', 'quantity', 'state']]
+        merged.drop(columns=['tradeid', 'quantity', 'state'], inplace=True)
+        merged = pd.merge(left=merged, right=tradeids, left_on=['datetime', 'ticker'], right_on=['datetime', 'ticker'],
+                          how='left')
+        return merged
+
+    filterdays = tradesdf[['ticker', 'date']].drop_duplicates()
+    filtereddf = pd.merge(left=fulldf.reset_index(), right=filterdays, how='inner', left_on=['date', 'ticker'],
+                          right_on=['date', 'ticker'])
+    filtereddf.drop(columns='date', inplace=True)
+    merged = pd.merge(left=filtereddf, right=tradesdf, how='left', left_on=['datetime', 'ticker'],
+                      right_on=['datetime', 'ticker']).drop_duplicates()  # .sort_values(by = 'datetime')
+    merged = openpositionfilter(merged)
+    merged['date'] = merged.datetime.dt.date
+    return merged
+fulldf = jointrades(trades, df)
+
+fulldf = fulldf.sort_values(by=['tradeid', 'ticker', 'datetime'])
+
+def backteststats(df):
+    df['tradevalue'] = df['quantity'] * df['close']
+    df['pl'] = df.groupby(['tradeid', 'ticker'])['tradevalue'].diff(1)
+    df['equity'] = df['pl'].cumsum()
+    df['cumpl'] = df.groupby('tradeid')['pl'].transform('cumsum')
+    df['brokerage'] = np.where((df['side'] == 'buy') | (df['side'] == 'sell'), df['tradevalue'].abs() * 0.0015, 0)
+    df['pl'].fillna(0, inplace=True)
+    df['netpl'] = df['pl'] - df['brokerage']
+    df['equitynet'] = df['netpl'].cumsum()
+    return df
+fulldf = backteststats(fulldf)
+
+i= fulldf.groupby('tradeid')['netpl'].sum().sort_values()
+
+fulldf['session'] = np.where(fulldf['time'] <datetime.time(11,30),'morning',np.where(fulldf['time'] < datetime.time(14,30),'mid','arvo'))
+plt.plot(fulldf.groupby('tradeid')['netpl'].sum().cumsum())
 
 
-x = data[data['signal']<0]
-days = x[['ticker','date']].drop_duplicates()
-data.reset_index(inplace=True)
-gapfaildf = pd.merge(data,days,left_on=['date','ticker'],right_on=['date','ticker'],how = 'inner')
+#optimise loop
+resultlist = {'target':[],'stop':[],'bottom':[],'top':[],'netpl':[],'winrate':[],'trades':[]}
+
+for top in np.arange(0.003,0.008,0.001):
+    for bottom in np.arange(-0.003,-0.008,-0.001):
+        for target in np.arange(0.003,0.02,0.001):
+            for stop in np.arange(0.002,0.01,0.001):
+
+                tempspreaddf = spreadtrade(spreaddf, 'ANZdaychg', 'WBCdaychg', top, bottom)
+                trades = generatetrades(tempspreaddf,target=target,stop = stop ,spread = ['ANZ','WBC'])
+
+            #join trades with pricedf
+                def jointrades(tradesdf,fulldf):
+                    #join the trades df back to the full data df for ease of plotting backtest results
+                    def openpositionfilter(merged):
+                        #filters larger dataframe by when there is an open trade and fills down the trade id so we can groupby tradeid
+                        grouped = merged.groupby('tradeid')
+                        for name, group in grouped:
+
+                            mask = ((merged['datetime'] >= grouped.get_group(name).datetime.iloc[0]) & (merged['datetime']<=grouped.get_group(name).datetime.iloc[-1])
+                                    & (merged['ticker'].isin(grouped.get_group(name).ticker.unique())))
+                            if name==1:
+                                filter = mask
+                            else:
+                                filter = mask | filter
+
+                        opentrade = merged.loc[filter]
+                        cols = ['tradeid','quantity','state']
+                        opentrade.loc[:,cols] = opentrade.loc[:,cols].ffill()
+                        tradeids = opentrade[['tradeid','datetime','ticker','quantity','state']]
+                        merged.drop(columns = ['tradeid','quantity','state'],inplace = True)
+                        merged = pd.merge(left = merged, right = tradeids,left_on=['datetime','ticker'],right_on=['datetime','ticker'],how='left')
+                        return merged
 
 
-def genEntrySignals(df):
+                    filterdays = tradesdf[['ticker','date']].drop_duplicates()
+                    filtereddf = pd.merge(left = fulldf.reset_index(),right=filterdays,how='inner',left_on=['date','ticker'],right_on=['date','ticker'])
+                    filtereddf.drop(columns='date',inplace=True)
+                    merged = pd.merge(left = filtereddf,right=tradesdf,how='left',left_on=['datetime','ticker'],
+                                      right_on=['datetime','ticker']).drop_duplicates()#.sort_values(by = 'datetime')
+                    merged = openpositionfilter(merged)
+                    merged['date'] = merged.datetime.dt.date
+                    return merged
+
+                fulldf = jointrades(trades,df)
+                fulldf = fulldf.sort_values(by = ['tradeid','ticker','datetime'])
+
+                def backteststats(df):
+                    df['tradevalue'] = df['quantity'] * df['close']
+                    df['pl'] = df.groupby(['tradeid','ticker'])['tradevalue'].diff(1)
+                    df['equity'] = df['pl'].cumsum()
+                    df['cumpl'] = df.groupby('tradeid')['pl'].transform('cumsum')
+                    df['brokerage'] = np.where((df['side'] == 'buy') | (df['side'] == 'sell'), df['tradevalue'].abs() * 0.0008,0)
+                    df['pl'].fillna(0, inplace=True)
+                    df['netpl'] = df['pl'] - df['brokerage']
+                    df['equitynet'] = df['netpl'].cumsum()
+                    return df
+                fulldf = backteststats(fulldf)
+
+                resultlist['target'].append(target)
+                resultlist['stop'].append(stop)
+                resultlist['bottom'].append(bottom)
+                resultlist['top'].append(top)
+                resultlist['netpl'].append(fulldf.netpl.sum())
+                resultlist['winrate'].append((fulldf.groupby('tradeid')['netpl'].sum() > 0).sum()/len(fulldf))
+                resultlist['trades'].append(len(fulldf.groupby('tradeid')['netpl'].sum()))
+
+
+results = pd.DataFrame(resultlist)
+results.to_csv('optimize2.csv')
+
+fulldffiltered = fulldf[fulldf]
+t =  sp.stockplots(fulldf)
+t.backtestplot(spread = ['ANZ','WBC'])
+t.backteststats()
+btest = t.backtestdf.T
+
+def backtestresult(df):
+    # takes a dataframe of trades and returns a dataframe of performance statistics
     data = df.copy()
-    data['signal'] =0
-    data['closesignal'] = 0
-    data['state'] = 'no position'
-    data['tradeid'] = 0
-    #trade signals
-    volcondition  = data['volume'] > data['avat30'] * 15
-    buycondition =  data['wap']>data['wap'].shift(1)
-    sellcondition = data['wap']<data['wap'].shift(1)
-    timecondition = data.index.time<datetime.time(15,55)
+    data['value'] = data.apply(lambda x: x['price']* abs(x['quantity'])*-1 if x['side']=='buy' else x['price'] * (abs(x['quantity'])),axis=1 )
+    performancedf = data.groupby(['tradeid','ticker'],as_index=False).sum()[['tradeid','ticker','value']].rename(columns = {'value':'pl'})
+    performancedf['equity'] = performancedf.groupby('ticker').cumsum()['pl']
 
-    data['signal'] = np.where((volcondition) & (buycondition) & (timecondition),1,np.where((volcondition)&(sellcondition) &(timecondition),-1,0))
-    signalsdf = data[data['signal']!=0][['date','ticker','time']]
-    data = data[data.set_index(['ticker','date']).index.isin(signalsdf.set_index(['ticker','date']).index)]
-    data['decisionpx'] = np.where(data['signal']==1,data['close'],0)
-    data['tradepx'] = np.where(data['signal'].shift(1)==1,data['wap'],np.where((data['signal'].shift(1)==-1),data['wap'],0))
-    #init positions
-    data['state'] = np.where(data['signal'].shift(1)==1,'long',np.where(data['signal'].shift(1)==-1,'short','no position'))
-    data['position'] = np.where(data['signal'].shift(1)==1,10000/data['wap'],np.where((data['signal'].shift(1)==-1),-10000/data['wap'],0))
-    data['longstop'] = data['low'].shift(1)/100
-    data['shortstop'] = data['high'].shift(1)/100
-    data = genTrades(data)
-    data['positionval'] = data['position'].abs() * data['close']/100
+    return performancedf
 
-    return data
 
-def backtestAnalyse(df, comm=0.0008):
 
-    data = df.copy()
-    #data = data[(data['position']!=0)|(data['signal']!=0)|(data['closesignal']!=0)|(data['tradepx'])!=0]
-
-    data['pl'] = 0
-    #conditions
-    longopen = (data['positionval']!=0) & (data['tradepx']!=0) & (data['position']>0)
-    shortopen = (data['positionval']!=0) & (data['tradepx']!=0) & (data['position']<0)
-    longclose = (data['positionval']==0) & (data['tradepx']!=0) & (data['position'].shift(1)>0)
-    shortclose = (data['positionval']==0) & (data['tradepx']!=0) & (data['position'].shift(1)<0)
-    longpositionhold = ((data['position'].shift(1) > 0) & (data['position'] > 0))
-    shortpositionhold = ((data['position'].shift(1) < 0) & (data['position'] < 0))
-
-    #vectorized to check whether opening or closing trade and which side or if just holding. adds p/l per minute column
-    data['pl'] = np.where(longopen & (data['pl']==0),data['positionval'] - (data['position'] * data['wap']),np.where(longclose, \
-                    data['positionval'].shift(1) - (data['position'].shift(1) * data['wap']),np.where(shortopen & (data['pl']==0), \
-                    (data['position'].abs() * data['wap']) - data['positionval'],np.where(shortclose, \
-                    (data['position'].shift(1).abs() * data['wap']) - data['positionval'].shift(1), \
-                    np.where(longpositionhold , data['positionval'] - data['positionval'].shift(1),\
-                    np.where(shortpositionhold ,data['positionval'].shift(1) - data['positionval'],0))))))
-
-    data['tradecumpl'] = data.groupby('tradeid')['pl'].transform('cumsum')
-
-    data['tradepxnet'] = np.where(data['state']=='long',data['tradepx']*(1-comm),np.where( \
-        data['state']=='short',data['tradepx']*(1+comm),0))
-    data['positioncalc'] = data['position']
-    data['positioncalc'] = np.where((data['state']!='no position')&(data['position'].shift(1)!=0),data['position'].shift(1),data['positioncalc'])
-    data['brokerage'] = np.where(data['tradepx']!=0,abs(data['positioncalc']*data['tradepx']*comm),0)
-    return data
-
-x= genEntrySignals(df)
-
-test = backtestAnalyse(x)
-
-testbtest = test[test['ticker']=='APT']
-
-btest = sp.stockplots(gapfaildf)
-btest.multiplot(3,4)
-btest.singleplot()
-btest.backtestplot()
-btest.showplot()
-
+imp.reload(sp)
 
 
