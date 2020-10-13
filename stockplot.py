@@ -6,6 +6,7 @@ import numpy as np
 import features as ft
 import math
 
+
 class stockplots():
 
     def __init__(self,dataframe):
@@ -139,6 +140,7 @@ class stockplots():
                     if len(self.uniquedays)!=1 and self.counter< len(self.uniquedays):
                         self.dataframefiltered = self.dataframe[(self.dataframe['ticker'] == self.uniquedays.ticker.iloc[self.counter])&
                                                             (self.dataframe['date'] == self.uniquedays.date.iloc[self.counter])]
+                        self.dataframefiltered = self.dataframefiltered.sort_values(by = 'datetime')
                         self.myx = self.dataframefiltered.time
                         self.trades = self.dataframefiltered[(self.dataframefiltered['side']=='buy')|(self.dataframefiltered['side']=='sell')]
                         self.addtraces(j,i,overlays)
@@ -203,27 +205,30 @@ class stockplots():
     def backtestplot(self, spread = []):
         self.issingle = True
         self.dataframefiltered = self.dataframe.copy()
-        self.myx = self.dataframefiltered.datetime
         self.trades = self.dataframefiltered[(self.dataframefiltered['side']=='buy')|(self.dataframefiltered['side']=='sell')]
 
         if spread:
-            self.rows = 5
+            self.rows = 6
             self.cols = 2
             self.ticker1 = spread[0]
             self.ticker2 = spread[1]
-            self.rowheights = [0.3,0.3,0.3,0.3,0.3]
+            self.rowheights = [0.3,0.3,0.3,0.15,0.3,0.3]
             self.specs =  [[{"secondary_y": True},{'type':'table'}], \
                            [{"secondary_y": True},{'type':'scatter'}], \
                            [{"secondary_y": True},{'type':'scatter'}], \
                            [{"secondary_y": True},{'type':'scatter'}], \
+                           [{"secondary_y": True},{'type':'scatter'}],
                            [{"secondary_y": True},{'type':'scatter'}]]
+
             self.titles = (spread[0],'Stats',spread[1],
-                           'P/L Distribution','Spread','','Position','','P/L')
+                           'P/L Distribution','Spread','','Position','','P/L','','Equity Net')
+
             self.spreaddf = ft.spread(self.dataframe,[self.ticker1,self.ticker2])
             self.spreaddf.rename(columns = {self.ticker1+self.ticker2 + 'close':self.ticker1 + self.ticker2},inplace = True)
             self.tradestemp = self.trades[self.trades['ticker']==self.ticker1]
             self.spreaddf = self.spreaddf.merge(self.tradestemp[['side','datetime']],left_on = 'datetime',right_on = 'datetime', how = 'left')
             self.spreaddf = self.spreaddf[['datetime', self.ticker1 + self.ticker2, 'side']].melt(id_vars=['datetime', 'side'], var_name='ticker', value_name='close')
+            self.myx = self.spreaddf.datetime
             self.dataframe = pd.concat([self.spreaddf,self.dataframe])
         else:
             self.rows = 3
@@ -242,8 +247,8 @@ class stockplots():
             shared_xaxes= True,
             vertical_spacing=0.02,
             row_heights=self.rowheights,
-            column_width=[14,5],
-            horizontal_spacing=0.05,
+            column_width=[14,8],
+            horizontal_spacing=0.07,
             subplot_titles= self.titles,
             specs= self.specs
         )
@@ -259,7 +264,7 @@ class stockplots():
         )
 
         self.fig.add_trace(go.Histogram(
-            x = self.backtrades['cumpl'].last(),
+            x = self.equity,
             histnorm = 'probability'),
         row =2,
         col = 2
@@ -270,9 +275,9 @@ class stockplots():
             for count, ticker in enumerate(spread):
                 self.dataframefiltered = self.dataframe[self.dataframe['ticker'] == ticker]
                 self.trades = self.tradestemp[self.tradestemp['ticker'] == ticker]
-                self.addtraces(count+1,1,['vwap'])
+                self.addtraces(count+1,1,[])
         else:
-            self.addtraces(1,1,['vwap'])
+            self.addtraces(1,1,[])
 
         self.trades = self.tradestemp
         self.dataframefiltered = self.dataframe
@@ -283,15 +288,24 @@ class stockplots():
             mode = 'lines+markers',
             name = 'Quantity',
             marker_color='rgba(63, 63, 191, 1)'),
-            row = self.rows - 1,
+            row = self.rows - 2,
             col = 1,
         )
 
         self.fig.add_trace(go.Scatter(
             x = self.myx,
-            y = self.dataframefiltered.cumpl,
+            y = self.dataframefiltered.netpl,
             mode = 'lines+markers',
             name = 'P&L',
+            marker_color='rgba(63, 63, 191, 1)'),
+            row = self.rows-1,
+            col = 1,
+        )
+        self.fig.add_trace(go.Scatter(
+            x = self.myx,
+            y = self.equity,
+            mode = 'lines+markers',
+            name = 'equity',
             marker_color='rgba(63, 63, 191, 1)'),
             row = self.rows,
             col = 1,
@@ -304,15 +318,13 @@ class stockplots():
 
             self.tradestemp = self.dataframefiltered[(self.dataframefiltered['side']=='buy') | (self.dataframefiltered['side']=='sell')]
 
-
-
             self.fig.add_trace(go.Scatter(
                 x = self.dataframefiltered.datetime,
                 y = self.dataframefiltered['close'],
                 mode = 'lines',
                 name = 'P&L',
                 marker_color='rgba(63, 63, 191, 1)'),
-                row = self.rows - 2,
+                row = self.rows - 3,
                 col = 1,
             )
 
@@ -343,7 +355,7 @@ class stockplots():
                     arrowwidth=1,
                     ax=0,
                     ay= self.orientation),
-                    row= self.rows - 2,
+                    row= self.rows - 3,
                     col=1)
 
 
@@ -354,31 +366,29 @@ class stockplots():
     def backteststats(self):
 
         self.backtrades =self.dataframe.groupby('tradeid')
+        self.equity = self.dataframe.groupby(['tradeid','datetime'])['netpl'].sum().cumsum()
 
         self.backtestdf = pd.DataFrame(
-            {'Start':[],'End':[],'Total Return Gross':[],'Brokerage':[],\
-             'Total Return Net':[],'# Trades':[],'# Winners':[],'# Losers':[],'# Scratch':[],'Win Rate':[],'Win/Loss':[], \
-             'Average Win':[],'Average Loss' :[],'Equity Final':[],'Equity Max':[], 'Equity Min':[], \
-             'Average Trade Duration':[],'Best Trade':[],'Worst Trade':[]
-            })
+            {'Start':[],'End':[],'Total net P/L':[],'Brokerage':[],'# Trades':[],'# Winners':[],'# Losers':[],'# Scratch':[],
+             'Win Rate':[],'Win/Loss':[],'Average Win':[],'Average Loss' :[],'Equity Final':[],'Equity Max':[], 'Equity Min':[], \
+             'Average Trade Duration':[],'Best Trade':[],'Worst Trade':[]})
 
         self.backtestdf.loc[0,'Start'] = self.dataframe.datetime.min()
         self.backtestdf.loc[0,'End'] = self.dataframe.datetime.max()
-        self.backtestdf.loc[0,'Total P/L'] = self.backtrades['equity'].last().iloc[-1]
-        #self.backtestdf.loc[0,'Brokerage'] = round(self.dataframe.brokerage.sum(),4)
-        #self.backtestdf.loc[0,'Total Return Net'] = round((self.dataframe['equity'].iloc[-1] - self.dataframe['brokerage'].sum())/self.dataframe['equity'].iloc[0]-1,2)
+        self.backtestdf.loc[0,'Total net P/L'] = round(self.dataframe['netpl'].sum(),4)
+        self.backtestdf.loc[0,'Brokerage'] = round(self.dataframe.brokerage.sum(),4)
         self.backtestdf.loc[0,'# Trades'] = self.dataframe.tradeid.max() - self.dataframe.tradeid.min()  + 1
-        self.backtestdf.loc[0,'# Winners'] = (self.backtrades['cumpl'].last()>0).sum()
-        self.backtestdf.loc[0,'# Losers'] = (self.backtrades['cumpl'].last()<0).sum()
-        self.backtestdf.loc[0,'# Scratch'] = (self.backtrades['cumpl'].last()==0).sum()
+        self.backtestdf.loc[0,'# Winners'] = (self.backtrades['netpl'].sum()>0).sum()
+        self.backtestdf.loc[0,'# Losers'] = (self.backtrades['netpl'].sum()<0).sum()
+        self.backtestdf.loc[0,'# Scratch'] = (self.backtrades['netpl'].sum()==0).sum()
         self.backtestdf.loc[0,'Win Rate'] = round(self.backtestdf.loc[0,'# Winners']/self.backtestdf.loc[0,'# Trades'],2)
-        self.backtestdf.loc[0,'Average Win'] = round(self.backtrades['cumpl'].last()[self.backtrades['cumpl'].last()>0].mean() / self.backtestdf.loc[0,'# Winners'],2)
-        self.backtestdf.loc[0,'Average Loss'] = round(self.backtrades['cumpl'].last()[self.backtrades['cumpl'].last()<0].mean() / self.backtestdf.loc[0,'# Losers'],2)
+        self.backtestdf.loc[0,'Average Win'] = round(self.backtrades.sum()[self.backtrades['netpl'].sum()>0]['netpl'].mean(),2)
+        self.backtestdf.loc[0,'Average Loss'] = round(self.backtrades.sum()[self.backtrades['netpl'].sum()<0]['netpl'].mean(),2)
         self.backtestdf.loc[0,'Win/Loss'] = round(self.backtestdf.loc[0,'Average Win']/abs(self.backtestdf.loc[0,'Average Loss']), 2)
-        self.backtestdf.loc[0,'Equity Max'] = round(self.dataframe['equity'].max(), 2)
-        self.backtestdf.loc[0,'Equity Min'] = round(self.dataframe['equity'].min(),2)
-        self.backtestdf.loc[0,'Best Trade'] = round(self.backtrades['cumpl'].last().max(),2)
-        self.backtestdf.loc[0,'Worst Trade'] = round(self.backtrades['cumpl'].last().min(),2)
+        self.backtestdf.loc[0,'Equity Max'] = round(self.equity.max(), 2)
+        self.backtestdf.loc[0,'Equity Min'] = round(self.equity.min(),2)
+        self.backtestdf.loc[0,'Best Trade'] = round(self.backtrades['netpl'].sum().max(),2)
+        self.backtestdf.loc[0,'Worst Trade'] = round(self.backtrades['netpl'].sum().min(),2)
 
 
 

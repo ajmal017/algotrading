@@ -1,8 +1,9 @@
-from ibapi.contract import Contract
+from ibapi.contract import Contract,ComboLeg
 from ibapi.object_implem import Object
 from ibapi.common import UNSET_INTEGER, UNSET_DOUBLE
 from ibapi.object_implem import Object
 from ibapi.softdollartier import SoftDollarTier
+from ibapi.tag_value import TagValue
 
 # enum Origin
 (CUSTOMER, FIRM, UNKNOWN) = range(3)
@@ -12,6 +13,15 @@ from ibapi.softdollartier import SoftDollarTier
  AUCTION_IMPROVEMENT, AUCTION_TRANSPARENT) = range(4)
 
 def createcontract(ticker):
+    cont = Contract()
+    cont.symbol = ticker
+    cont.secType = "CFD"
+    cont.currency = "AUD"
+    cont.exchange = "SMART"
+    return cont
+
+
+def createcontractstk(ticker):
     cont = Contract()
     cont.symbol = ticker
     cont.secType = "STK"
@@ -28,6 +38,50 @@ def createContractObject(tickerlist):
         cont.exchange = "ASX"
 
     return obj
+
+
+
+def createSpreadContract(ticker1,ticker2,conids):
+        contract = Contract()
+        contract.symbol = 'ANZ,WBC'
+        contract.secType = "BAG"
+        contract.currency = "AUD"
+        contract.exchange = "SMART"
+
+        leg1 = ComboLeg()
+        leg1.conId = conids[ticker1]
+        leg1.ratio = 1
+        leg1.action = "BUY"
+        leg1.exchange = "SMART"
+
+
+        leg2 = ComboLeg()
+        leg2.conId = conids[ticker2]
+        leg2.ratio = 1
+        leg2.action = "SELL"
+        leg2.exchange = "SMART"
+
+        contract.comboLegs = []
+        contract.comboLegs.append(leg1)
+        contract.comboLegs.append(leg2)
+        return contract
+
+
+def ComboLimitOrder(action: str, quantity: float , limitPrice: float,
+                        nonGuaranteed: bool):
+        order = Order()
+        maxleg = round(0.2*quantity)
+        order.action = action
+        order.orderType = "LMT"
+        order.totalQuantity = quantity
+        order.lmtPrice = limitPrice
+        if nonGuaranteed:
+            order.smartComboRoutingParams = []
+            order.smartComboRoutingParams.append(TagValue("NonGuaranteed", "1",))
+            order.smartComboRoutingParams.append(TagValue('MaxSegSize',maxleg))
+        return order
+
+
 
 class Order(Object):
     def __init__(self):

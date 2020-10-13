@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import itertools
+import datetime
 
 def addsma(df,period =[30],column = 'close',spread = False):
     data = df.copy()
@@ -13,6 +14,13 @@ def addsma(df,period =[30],column = 'close',spread = False):
             data['sma' + str(i) + 'prev' + column] = data.groupby('date')['sma' + str(i) + column].shift(1)
 
     return data
+
+def spreadroc(df, spread = ['ANZ','WBC'],period= [10]):
+    data = df.copy()
+    for i in period:
+        data['spreadroc'+str(i)] = data.groupby('date')[spread[0]+spread[1] +'close'].pct_change(i)
+    return data
+
 
 def tyronestdev(df,period = 30):
     df['tystdevclose' + str(period)] = df.groupby(['date','ticker'])['close'].transform(lambda x: x.rolling(period).std())
@@ -69,11 +77,14 @@ def vwap(df):
     return df
 #create average volume at time
 def avat(df):
-    df['avat30'] = df.groupby(['ticker',df.index.time])['volume'].transform(lambda x: round(x.rolling(30).mean(),0))
+    df['avat5'] = df.groupby(['ticker',df.index.time])['volume'].transform(lambda x: round(x.rolling(5).mean(),0))
     #create cumulative volume at time
-    df['cavat30'] = df.groupby(['ticker',df.index.date])['avat30'].transform('cumsum')
+    df['cavat5'] = df.groupby(['ticker',df.index.date])['avat5'].transform('cumsum')
     return df
-#
+
+def vwapstretch(df):
+    df['vwapstr'] = df['close']/df['vwap']
+    return df
 def wap(df):
     df['wap'] = df[['close','volume','value']].apply(lambda x: x['close'] if x['volume'] == 0 else round(x['value']/x['volume'],4),axis =1)
     return df
@@ -122,8 +133,11 @@ def spread(df,ticker:list,vals = ['close','volume']):
     namelist = [j + i for i, j in spreaddf.columns]
     spreaddf = spreaddf.droplevel(0, axis=1)
     spreaddf.columns = namelist
-    spreaddf['date'] = spreaddf.index.date
-    spreaddf['time'] = spreaddf.index.time
+    if spreaddf.index.dtype == '<M8[ns]':
+        spreaddf['date'] = spreaddf.index.date
+        spreaddf['time'] = spreaddf.index.time
+
+
     return spreaddf
 
 def gapUpFail(df,gap = 0.02,failby = datetime.time(10,15)):
