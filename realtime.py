@@ -44,7 +44,7 @@ class App(EWrapper, EClient):
         self.tickerlist = ['NEA','APX','BHP','FMG','RIO','FMG','APT','ALU','APX','WTC','SEK','CAR','COH','PME',
                            'ANN','SHL','RHC','AGL','ORG','ASX','TCL','XRO','NCM','NST','SGM','WOW','WES','CPU','DMP',
                            'HVN','JBH','STO','WPL','IEL','SOL','FLT','WEB','FPH','CSL','IAG','SUN','PDL','MFG','JHG','LNK',
-                           'NXT','GMG','MP1','OSH','RMD','REA','DHG','TNE','RWC','TWE','SYD','AST','SKI','BIN','CWY']
+                           'NXT','GMG','MP1']#,'OSH','RMD','REA','DHG','TNE','RWC','TWE','SYD','AST','SKI','BIN','CWY']
 
         self.colnames = ['ticker','datetime','open','high','low','close','volume','vwap','count']
         self.contracts = createContractObject(self.tickerlist)
@@ -539,6 +539,7 @@ class App(EWrapper, EClient):
                                 closedict['signal'].append(signal)
                                 closedict['close'].append(data[key]['stocksclose'][0])
                                 closedict['quantity'].append(abs(data[key]['position'][0]))
+                                closedict['sectype'].append(data[key]['sectype'][0])
                             if ticker in self.openorderdict.keys():
                                 self.cancelOrder(self.openorderdict[ticker]['orderid'])
 
@@ -550,6 +551,7 @@ class App(EWrapper, EClient):
                                 closedict['signal'].append(signal)
                                 closedict['close'].append(data[key]['stocksclose'][1])
                                 closedict['quantity'].append(abs(data[key]['position'][1]))
+                                closedict['sectype'].append(data[key]['sectype'][1])
                             if ticker in self.openorderdict.keys():
                                 self.cancelOrder(self.openorderdict[ticker]['orderid'])
 
@@ -804,7 +806,12 @@ class App(EWrapper, EClient):
                     nextorder = self.nextOrderId()
                     self.openspreaddict[ticker]['sectype'][1] = 'STK'
                     self.openspreaddict[ticker]['orderids'][1][nextorder] = None
-                    side = self.openspreaddict[ticker]['side']
+                    if self.openspreaddict[ticker]['side'] =='buy':
+                        side = 'sell'
+                    else:
+                        self.openspreaddict[ticker]['side']=='sell'
+                        side = 'buy'
+
                     quantity = self.openorderdict[code]['quantity']
                     limitpx = self.openorderdict[code]['limitpx']
                     self.placeOrder(nextorder, contract, LimitOrder(side, quantity, limitpx))
