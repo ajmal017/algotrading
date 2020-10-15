@@ -44,7 +44,7 @@ class App(EWrapper, EClient):
         self.tickerlist = ['NEA','APX','BHP','FMG','RIO','FMG','APT','ALU','APX','WTC','SEK','CAR','COH','PME',
                            'ANN','SHL','RHC','AGL','ORG','ASX','TCL','XRO','NCM','NST','SGM','WOW','WES','CPU','DMP',
                            'HVN','JBH','STO','WPL','IEL','SOL','FLT','WEB','FPH','CSL','IAG','SUN','PDL','MFG','JHG','LNK',
-                           'NXT','GMG','MP1']#,'OSH','RMD','REA','DHG','TNE','RWC','TWE','SYD','AST','SKI','BIN','CWY']
+                           'NXT','GMG','MP1','OSH','RMD','REA','DHG','TNE','RWC','TWE','SYD','AST','SKI','BIN','CWY']
 
         self.colnames = ['ticker','datetime','open','high','low','close','volume','vwap','count']
         self.contracts = createContractObject(self.tickerlist)
