@@ -5,6 +5,7 @@ from ibapi.contract import Contract, ContractDetails
 from ibapi.order_state import OrderState
 from ibapi.common import BarData
 from ibapi.order import Order
+import pickle
 import pytz
 from mycontracts import createContractObject, LimitOrder,createcontract, createSpreadContract,ComboLimitOrder,createcontractstk
 import pandas as pd
@@ -53,7 +54,8 @@ class App(EWrapper, EClient):
         self.lasttime = time.time()
         self.requestcounter = 0
         self.fiveseccount = 0
-        self.ordermanager={}
+        self.prevcloseready =False
+        self.ordermanager= self.loadit('ordermanager')
         self.wait = False
         self.openpositiondict = {}
         self.shortable = {}
@@ -68,10 +70,10 @@ class App(EWrapper, EClient):
                         ['ANN','WTC'],['SHL','RHC'],['AGL','ORG'],['ASX','TCL'],['XRO','ALU'],['XRO','APT'],
                         ['RIO','SGM'],['COH','SEK'],['WOW','WES'],['ALU','CPU'],['DMP','HVN'],['NCM','NST'],
                         ['HVN','JBH'],['STO','WPL'],['IEL','SOL'],['FLT','WEB'],['FPH','COH'],['CSL','FPH'],
-                        ['IAG','SUN'],['PDL','MFG'],['JHG','PDL'],['LNK','CPU'],['NXT','MP1'],['NXT','GMG'],
-                        ['ORG','WPL']]#,['OSH','STO'],['OSH','WPL']]#,['RMD','FPH'],['RMD','COH'],['CSL','RMD']]#,
-                         # ['REA','DHG'],['SOL','COH'],['TNE','ALU'],['RWC','TWE'],['XRO','WTC'],['SYD','TCL'],
-                         # ['AST','SKI'],['XRO','APX'],['ANN','COH'],['BIN','CWY'], ['SGM','BHP']]
+                        ['IAG','SUN'],['PDL','MFG'],['JHG','PDL'],['LNK','CPU'],['NXT','MP1']]#,['NXT','GMG'],
+                        # ['ORG','WPL'],['OSH','STO'],['OSH','WPL'],['RMD','FPH'],['RMD','COH'],['CSL','RMD'],
+                        # ['REA','DHG'],['SOL','COH'],['TNE','ALU'],['RWC','TWE'],['XRO','WTC'],['SYD','TCL'],
+                        # ['AST','SKI'],['XRO','APX'],['ANN','COH'],['BIN','CWY'], ['SGM','BHP']]
 
         self.lastclosedict = dict.fromkeys(self.tickerlist)
 
@@ -158,7 +160,7 @@ class App(EWrapper, EClient):
                            'SGMBHP': {'roclow': -0.002, 'rochigh': 0.002, 'upper': 0.022, 'lower': -0.022}
                            }
 
-        self.openspreaddict = {}
+        self.openspreaddict = self.loadit('openspreaddict')
         self.prevclosedict = {}
         self.maxpositiongross = {'NEAAPX':20000,'NEAAPT':20000,'BHPFMG':20000,'RIOFMG':20000,'ALUAPX':20000,
                                  'APXAPT':20000,'APTALU':20000,'WTCAPT':20000,'WTCALU':20000,'WTCAPX':20000,
@@ -203,6 +205,10 @@ class App(EWrapper, EClient):
 
         if 1 not in [len(self.prevclosedict[i]) for i in self.prevclosedict.keys()]:
             self.prevclosedict = {self.prevclosedict[i][0]:self.prevclosedict[i][1] for i in self.prevclosedict.keys()}
+            print(self.prevclosedict)
+            self.prevcloseready = True
+
+
 
 
 
@@ -218,17 +224,34 @@ class App(EWrapper, EClient):
             self.tickerdict[i]=j
         self.start()
 
+    def dumpit(self,data,filename):
+        file = open(filename,'wb')
+        pickle.dump(data,file)
+        file.close()
+
+    def loadit(self,filename):
+        try:
+            file = open(filename,'rb')
+            myobj = pickle.load(file)
+            file.close()
+        except:
+            myobj = {}
+        return myobj
+
+
     def openOrder(self, orderId: int, contract: Contract, order: Order,
                   orderState: OrderState):
         super().openOrder(orderId, contract, order, orderState)
-        print("OpenOrder. PermId: ", order.permId, "ClientId:", order.clientId, " OrderId:", orderId,
-              "Account:", order.account, "Symbol:", contract.symbol, "SecType:", contract.secType,
-              "Exchange:", contract.exchange, "Action:", order.action, "OrderType:", order.orderType,
-              "TotalQty:", order.totalQuantity, "CashQty:", order.cashQty,
-              "LmtPrice:", order.lmtPrice, "AuxPrice:", order.auxPrice, "Status:", orderState.status)
+        # print("OpenOrder. PermId: ", order.permId, "ClientId:", order.clientId, " OrderId:", orderId,
+        #       "Account:", order.account, "Symbol:", contract.symbol, "SecType:", contract.secType,
+        #       "Exchange:", contract.exchange, "Action:", order.action, "OrderType:", order.orderType,
+        #       "TotalQty:", order.totalQuantity, "CashQty:", order.cashQty,
+        #       "LmtPrice:", order.lmtPrice, "AuxPrice:", order.auxPrice, "Status:", orderState.status)
 
         order.contract = contract
         self.openorderdict[contract.symbol] = {'orderid':orderId,'quantity':order.totalQuantity,'limitpx':order.lmtPrice}
+        if orderState.status == "Filled":
+            self.openorderdict.pop(contract.symbol)
         print('open orders ' + str(self.openorderdict))
 
     def position(self, account: str, contract: Contract, position: float,
@@ -257,11 +280,11 @@ class App(EWrapper, EClient):
                     whyHeld: str, mktCapPrice: float):
         super().orderStatus(orderId, status, filled, remaining,
                             avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice)
-        # print("OrderStatus. Id:", orderId, "Status:", status, "Filled:", filled,
-        #       "Remaining:", remaining, "AvgFillPrice:", avgFillPrice,
-        #       "PermId:", permId, "ParentId:", parentId, "LastFillPrice:",
-        #       lastFillPrice, "ClientId:", clientId, "WhyHeld:",
-        #       whyHeld, "MktCapPrice:", mktCapPrice)
+        print("OrderStatus. Id:", orderId, "Status:", status, "Filled:", filled,
+              "Remaining:", remaining, "AvgFillPrice:", avgFillPrice,
+              "PermId:", permId, "ParentId:", parentId, "LastFillPrice:",
+              lastFillPrice, "ClientId:", clientId, "WhyHeld:",
+              whyHeld, "MktCapPrice:", mktCapPrice)
 
         for key in self.openspreaddict.keys():
             for leg in range(2):
@@ -274,8 +297,10 @@ class App(EWrapper, EClient):
 
                     self.openspreaddict[key]['position'][leg] = sum(self.openspreaddict[key]['orderids'][leg].values())
                     print('openspreads ' + str(self.openspreaddict))
-        self.reqAccountSummary(1000000, "All", AccountSummaryTags.AvailableFunds)
 
+
+        self.reqAccountSummary(1000000, "All", AccountSummaryTags.AvailableFunds)
+        self.dumpit(self.openspreaddict,'openspreaddict')
 
     def realtimeBar(self, reqId:TickerId, time:int, open_: float, high: float, low: float, close: float,
                         volume: int, wap: float, count: int):
@@ -311,8 +336,10 @@ class App(EWrapper, EClient):
             self.availablelist = self.getavailablespreads()
             print('available list: ' + str(self.availablelist))
 
-            if self.availablelist and datetime.now().time()< datetime(datetime.now().year,datetime.now().month,datetime.now().day,15,30).time():
+            if self.availablelist and datetime.now().time()< datetime(datetime.now().year,datetime.now().month,datetime.now().day,15,30).time() and self.prevcloseready == True:
                 print('$$$$$$$$$$$$$$$$$$$ Making that money $$$$$$$$$$$$$$$$$$$')
+                print(self.prevclosedict)
+                print(self.df)
                 self.alpha = al.alphamodel(self.df,self.prevclosedict)
                 self.tradestoopen = self.alpha.generateNewSpreadTrades(self.availablelist,self.openparams)
             #get latest data for open positions
@@ -345,7 +372,6 @@ class App(EWrapper, EClient):
     def sizeit(self,tradestoopen):
 
         tradestoopen['maxpos'] = tradestoopen['ticker'].map(self.maxpositiongross)
-        print(tradestoopen)
         tradestoopen['ticker1last'] = tradestoopen['ticker1'].map(self.lastclosedict)
         tradestoopen['ticker2last'] = tradestoopen['ticker2'].map(self.lastclosedict)
         tradestoopen['quantity1'] = round((tradestoopen['maxpos']/2) / tradestoopen['ticker1last'])
@@ -356,14 +382,13 @@ class App(EWrapper, EClient):
         if float(self.availablefunds) < 5000:
             tradestoopen = pd.DataFrame()
 
-        if tradestoopen['maxpos'].sum()/2.5 > float(self.availablefunds):
+        elif tradestoopen['maxpos'].sum()/2.5 > float(self.availablefunds):
+            print(tradestoopen)
             scalar = self.availablefunds / ((tradestoopen['maxpos'].sum())/2.5)
             tradestoopen['quantity1'] = round(tradestoopen['quantity1'] * scalar)
             tradestoopen['quantity2'] = round(tradestoopen['quantity2'] * scalar)
-
-        #TODO need to make this iterate not just exclude all trades
-        if tradestoopen['quantity1'].iloc[0] * tradestoopen['ticker1last'].iloc[0] < 9000:
-            tradestoopen = pd.DataFrame()
+            if tradestoopen['quantity1'].iloc[0] * tradestoopen['ticker1last'].iloc[0] < 9000:
+                tradestoopen = pd.DataFrame()
 
         self.reqAccountSummary(1000000, "All", AccountSummaryTags.AvailableFunds)
 
@@ -388,27 +413,20 @@ class App(EWrapper, EClient):
         for index, row in trades.iterrows():
             if row['signal'] =='buy':
                 sellticker = row['ticker2']
-                print('shortable' + str(self.shortable))
                 if self.shortable[sellticker]==3:
-                    print('short ticker ==3 ' + str(self.shortable[sellticker]))
                     keeptickers.append(row['ticker'])
-                    print('keeptickers ' + str(keeptickers))
             elif row['signal'] =='sell':
                 sellticker = row['ticker1']
-                print('shortable' + str(self.shortable))
                 if self.shortable[sellticker]==3:
-                    print('short ticker ==3 ' + str(self.shortable[sellticker]))
                     keeptickers.append(row['ticker'])
-                    print('keeptickers ' + str(keeptickers))
-        print(trades[trades['ticker'].isin(keeptickers)])
         return trades[trades['ticker'].isin(keeptickers)]
 
 
     def accountSummary(self, reqId: int, account: str, tag: str, value: str,
                        currency: str):
         super().accountSummary(reqId, account, tag, value, currency)
-        print("AccountSummary. ReqId:", reqId, "Account:", account,
-              "Tag: ", tag, "Value:", value, "Currency:", currency)
+        # print("AccountSummary. ReqId:", reqId, "Account:", account,
+        #       "Tag: ", tag, "Value:", value, "Currency:", currency)
         self.availablefunds = value
         print('available funds' + str(value))
         self.cancelAccountSummary(1000000)
@@ -416,19 +434,23 @@ class App(EWrapper, EClient):
     def getavailablespreads(self):
         cantrade = []
         availabletickers =  self.df.ticker.unique()
-        print('avail tickers '  + str(self.df.ticker.unique()))
         #check if we have data today
         for spread in self.spreads:
             if spread[0] in availabletickers and spread[1] in availabletickers:
                 cantrade.append([spread[0],spread[1]])
 
         spreadtickers = [i[0]+i[1] for i in cantrade]
-        print('spread tickers '  + str(spreadtickers))
         # check if spread already open
         cantrade = list(set(spreadtickers) - set(self.openspreaddict.keys()))
         cantrade = [[i[:3],i[3:]] for i in cantrade]
-        print("can trade " + str(cantrade))
         return cantrade
+
+    def resetpickle(self):
+        for i in ['openspreaddict','ordermanager']:
+            data = {}
+            file = open(i, 'wb')
+            pickle.dump(data, file)
+            file.close()
 
     def mapibpositions(self,algo,price):
         #function to map ib output to algo input for spreads
@@ -441,7 +463,8 @@ class App(EWrapper, EClient):
                     price2 = price[key[3:]]
                     algo[key]['stocksclose'][1] = price2
 
-            algo[key]['close'] = price1 / price2
+            if not price1 == None and not price2 == None:
+                algo[key]['close'] = price1 / price2
 
         return algo
 
@@ -459,7 +482,7 @@ class App(EWrapper, EClient):
                 stop = round(row.close * (1 + self.closeparams[row.ticker]['stop']),4)
                 self.ordermanager[row.ticker] = {'last' : row.close,'stop':stop,'target':target,'timeexpiry':
                 datetime(datetime.now().year,datetime.now().month, datetime.now().day, 15,50)}
-
+        self.dumpit(self.ordermanager,'ordermanager')
         return self.ordermanager
 
     def GetCloseTrades(self,data):
@@ -519,7 +542,6 @@ class App(EWrapper, EClient):
                                 signal = 'buy'
                                 closedict['ticker'].append(ticker)
                                 closedict['signal'].append(signal)
-                                print(data)
                                 closedict['close'].append(data[key]['stocksclose'][1])
                                 closedict['quantity'].append(abs(data[key]['position'][1]))
                                 closedict['sectype'].append(data[key]['sectype'][1])
@@ -563,7 +585,9 @@ class App(EWrapper, EClient):
             for i in dicttoclear:
                 self.positiontracker.pop(i, None)
                 self.ordermanager.pop(i, None)
+                self.dumpit(self.ordermanager, 'ordermanager')
                 self.openspreaddict.pop(i, None)
+                self.dumpit(self.openspreaddict, 'openspreaddict')
 
     # def updateMktDepth(self, reqId: TickerId, position: int, operation: int,
     #                    side: int, price: float, size: int):
@@ -754,6 +778,7 @@ class App(EWrapper, EClient):
                         self.placeOrder(nextorder, ticker, LimitOrder(side, quantity, limitpx))
                         self.openspreaddict[row['ticker']]['orderids'][1][nextorder] = None
                 print('open spreaddict: ' + str(self.openspreaddict))
+                self.dumpit(self.openspreaddict,'openspreaddict')
             else:
                 if row['sectype'] == 'STK':
                     ticker = createcontractstk(row['ticker'])
@@ -836,16 +861,16 @@ class App(EWrapper, EClient):
 
 
     def start(self):
-        print(self.contracts)
         self.reqAccountSummary(1000000, "All", AccountSummaryTags.AvailableFunds)
         self.reqPositions()
-        #self.reqMktDepth(5000, self.contracts[1], 1, False, [])
+        if datetime.now().time() < datetime(datetime.now().year, datetime.now().month,datetime.now().day, 9,59).time():
+            self.resetpickle()
         for i in range(len(self.contracts)):
             self.shortabledict[i] = self.contracts[i].symbol
             print('sending ' + str(self.contracts[i].symbol))
             self.requestcounter +=1
-            self.throttle()
             self.getprevclose(self.contracts[i])
+            self.throttle()
             self.reqRealTimeBars(list(self.tickerdict.keys())[i],self.contracts[i],5,'TRADES',True,[])
             self.reqMktData(list(self.shortabledict.keys())[i], self.contracts[i], "236", False, False, [])
 
