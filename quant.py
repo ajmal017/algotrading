@@ -26,6 +26,7 @@ spreads = [['AGL','ORG'],['ASX','TCL'],['XRO','ALU'],['XRO','APT'],
                         ['REA','DHG'],['SOL','COH'],['TNE','ALU'],['RWC','TWE'],['XRO','WTC'],['SYD','TCL'],
                         ['AST','SKI'],['XRO','APX'],['ANN','COH'],['BIN','CWY'], ['SGM','BHP']]
 
+
 closeparams = {'NEAAPX':{'stop':0.018,'target':0.1},'NEAAPT':{'stop':0.018,'target':0.1},
                             'BHPFMG':{'stop':0.016,'target':0.024},'RIOFMG':{'stop':0.016,'target':0.026},
                             'ALUAPX':{'stop':0.016,'target':0.1},'APXAPT':{'stop':0.018,'target':0.1},
@@ -132,11 +133,11 @@ for spread in spreads:
         ticker in ('""" + ticker1 +"','" + ticker2+"')"
 
         query3 = """
-        SELECT * FROM asxminutedata where datetime > '1/05/2019' and datetime < '31/10/2019' AND
+        SELECT * FROM asxminutedata where datetime > '1/09/2020' and datetime < '22/10/2020' AND
         ticker in ('""" + ticker1 +"','" + ticker2+"')"
 
         colnames = ['open','high','low','close','volume','value','count','datetime','ticker']
-        x = dbconn.pgquery(dbconn.conn,query,None)
+        x = dbconn.pgquery(dbconn.conn,query3,None)
         df = pd.DataFrame(x, columns= colnames).set_index('datetime')
         df = df.sort_values(by = ['ticker', 'datetime'], ascending = [True, True])
         df['date']  = df.index.date
@@ -395,7 +396,7 @@ for spread in spreads:
 
 
 signals = pd.DataFrame(signals)
-signals.to_csv('sigs.csv')
+signals.to_csv('sigs1.csv')
 # fulldf['session'] = np.where(fulldf['time'] <datetime.time(11,30),'morning',np.where(fulldf['time'] < datetime.time(14,30),'mid','arvo'))
 # fulldf.groupby('session')['netpl'].sum()
 # fulldf.groupby('time')['netpl'].sum().to_csv('oostime.csv')
@@ -408,7 +409,7 @@ signals.to_csv('sigs.csv')
 #
 # fulldffiltered = fulldf[fulldf['tradeid'].isin(list(np.arange(1,25,1)))]
 #
-
+#
 # t = sp.stockplots(fulldf)
 # t.backtestplot(spread = [ticker1,ticker2])
 # t.multiplot(1,1)
@@ -426,6 +427,6 @@ signals.to_csv('sigs.csv')
 #
 # fulldf.groupby('time')['netpl'].sum().to_csv('test.csv')
 #
-imp.reload(sp)
+# imp.reload(sp)
 
 

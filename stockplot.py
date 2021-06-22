@@ -14,7 +14,7 @@ class stockplots():
         self.dataframe.reset_index(inplace = True)
         self.uniquedays = self.dataframe.groupby(['date', 'ticker'])[['date', 'ticker']].max().reset_index(drop = True)
         self.dataframe['datetime'] = self.dataframe['datetime'].astype(str)
-        self.dataframe.sort_values(by = 'datetime')
+        self.dataframe.sort_values(by = 'datetime',inplace=True)
         self.plotcount = 0
         self.issingle = True
         self.isindicatorplot = False
